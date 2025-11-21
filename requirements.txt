@@ -1,4 +1,8 @@
 fastapi
 uvicorn
 gnews
-nltk
+newspaper3k
+google-generativeai
+requests
+lxml
+lxml_html_clean
