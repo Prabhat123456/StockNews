@@ -10,6 +10,10 @@ import yfinance as yf
 from cachetools import TTLCache # <--- NEW IMPORT
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import HTTPException
+from typing import Dict, Any
 
 import re
 
@@ -69,7 +73,23 @@ def is_chat_or_spam_link(url: str) -> bool:
 
 
 
-app = FastAPI(title="AI Stock News Analyst (OpenAI)")
+app = FastAPI(title="Stock Analysis Agent")
+
+# Define the origins (URLs) that are ALLOWED to access your API
+origins = [
+    "http://localhost",
+    "http://localhost:5173",  # <--- YOUR FRONTEND PORT
+    "http://127.0.0.1:5173",
+    # Add your production frontend URL here once deployed, e.g., "https://your-frontend-domain.com"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,              # List of allowed origins
+    allow_credentials=True,             # Allow cookies/authorization headers
+    allow_methods=["*"],                # Allow all methods (GET, POST, etc.)
+    allow_headers=["*"],                # Allow all headers
+)
 
 
 def filter_and_sort_news(news_results: List[Dict[str, Any]], ticker: str, company_name: str) -> List[Dict[str, Any]]:
@@ -104,7 +124,7 @@ def filter_and_sort_news(news_results: List[Dict[str, Any]], ticker: str, compan
                          'whistleblower complaint', 'downgrade by rating agency', 'credit rating upgrade',
                          'cyber attack', 'data breach', 'environmental violation', 'export ban', 'import duty',
                          'raw material shortage', 'fed policy impact', 'currency fluctuation', 'geo-political risk',
-                         'commodity price surge', 'commodity price fall', 'downgrade', 'upgrade']
+                         'commodity price surge', 'commodity price fall', 'downgrade', 'upgrade', 'buyback', 'growth', 'tender']
 
     # 2. Define the search terms (ticker and full name)
     search_terms = {ticker.upper(), company_name.upper()}
@@ -155,7 +175,7 @@ def get_company_name_and_query(ticker: str) -> str:
     low_value_exclusion = "NOT ('52 week' OR '52w'  OR 'technical analysis' OR 'brokerage' OR 'sensex' OR 'nifty')"
 
     # Target high-impact, catalytic events (works for any stock)
-    # catalyst_keywords = "(anti-dumping OR government OR policy OR duty OR tariff OR capex OR expansion OR result OR earnings OR concall OR margin OR guidance OR acquisition OR divestiture OR Growing TAM OR Operating leverage OR Value chain climb (forward integration/value-added) OR capex OR Geographic expansion OR New products OR Deleveraging OR segments OR fundraise OR demerger OR warrants OR M&A/strategic stakes OR Management OR strategy OR Order book OR pipeline expansion OR breaks OR deals OR shares OR bags OR surges OR down OR pledge OR sell OR buyback OR order win OR export growth OR margin expansion OR new product launch OR regulatory approval OR capacity addition OR debt reduction OR strategic partnership OR government incentive OR strong guidance OR record revenue OR promoter buying OR anti-dumping duty OR penalty OR QIP OR ED OR investigation OR fraud OR plant shutdown OR weak guidance OR debt default OR supply disruption OR promoter selling OR margin compression OR layoffs OR price hike denial OR loss of contract OR regulatory ban OR litigation OR order inflow OR favorable regulation OR price hike OR volume growth OR market share gain OR operational efficiency OR cost optimization OR resumption of production OR channel expansion OR distribution expansion OR technology upgrade OR patent approval OR ESG compliance OR asset monetization OR dividend announcement OR bonus issue OR stock split OR global expansion OR license approval OR supply agreement OR long-term contract OR turnaround plan OR profit warning OR inventory buildup OR management resignation OR whistleblower complaint OR downgrade by rating agency OR credit rating upgrade OR cyber attack OR data breach OR environmental violation OR export ban OR import duty OR raw material shortage OR fed policy impact OR currency fluctuation OR geo-political risk OR commodity price surge OR commodity price fall OR downgrade OR upgrade)"
+    # catalyst_keywords = "(anti-dumping OR government OR policy OR duty OR tariff OR capex OR expansion OR result OR earnings OR concall OR margin OR guidance OR acquisition OR divestiture OR Growing TAM OR Operating leverage OR Value chain climb (forward integration/value-added) OR capex OR Geographic expansion OR New products OR Deleveraging OR segments OR fundraise OR demerger OR warrants OR M&A/strategic stakes OR Management OR strategy OR Order book OR pipeline expansion OR breaks OR deals OR shares OR bags OR surges OR down OR pledge OR sell OR buyback OR order win OR export growth OR margin expansion OR new product launch OR regulatory approval OR capacity addition OR debt reduction OR strategic partnership OR government incentive OR strong guidance OR record revenue OR promoter buying OR anti-dumping duty OR penalty OR QIP OR ED OR investigation OR fraud OR plant shutdown OR weak guidance OR debt default OR supply disruption OR promoter selling OR margin compression OR layoffs OR price hike denial OR loss of contract OR regulatory ban OR litigation OR order inflow OR favorable regulation OR price hike OR volume growth OR market share gain OR operational efficiency OR cost optimization OR resumption of production OR channel expansion OR distribution expansion OR technology upgrade OR patent approval OR ESG compliance OR asset monetization OR dividend announcement OR bonus issue OR stock split OR global expansion OR license approval OR supply agreement OR long-term contract OR turnaround plan OR profit warning OR inventory buildup OR management resignation OR whistleblower complaint OR downgrade by rating agency OR credit rating upgrade OR cyber attack OR data breach OR environmental violation OR export ban OR import duty OR raw material shortage OR fed policy impact OR currency fluctuation OR geo-political risk OR commodity price surge OR commodity price fall OR downgrade OR upgrade OR buyback OR growth OR tender)"
 
     # 3. Combine them into the final, dynamic GNews query
     query = f'{search_term}  {low_value_exclusion}'
@@ -294,13 +314,34 @@ def get_stock_analysis(ticker: str, limit: int = 10) -> Dict[str, Any]:
             "source": news_item.get('publisher', {}).get('title'),
             "analysis": analysis
         })
-    set_cached_analysis(ticker_upper, analyzed_data)
+    if len(analyzed_data) > 0:
+        set_cached_analysis(ticker_upper, analyzed_data)
     return {
         "stock": ticker,
         "total_articles_analyzed": len(analyzed_data),
         "articles": analyzed_data
     }
 
+
+@app.get("/cache/clear", tags=["Cache Management"])
+def clear_cache() -> Dict[str, Any]:
+    """
+    Clears all cached stock analysis results, forcing the next request
+    to perform a live LLM analysis.
+    """
+    try:
+        # The .clear() method removes all key-value pairs from the TTLCache object
+        analysis_cache.clear()
+
+        # Return success message and the current timestamp
+        return {
+            "status": "success",
+            "message": "All entries successfully cleared from the 12-hour analysis cache.",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        # In case the cache object is not accessible
+        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {e}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
