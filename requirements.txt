@@ -1,8 +1,9 @@
 fastapi
 uvicorn
 gnews
-newspaper3k
-google-generativeai
 requests
-lxml
-lxml_html_clean
+beautifulsoup4
+openai
+yfinance
+cachetools
+python-dotenv
